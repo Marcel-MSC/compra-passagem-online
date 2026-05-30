@@ -1,0 +1,21 @@
+## Build artifacts
+bin/
+obj/
+out/
+
+## IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Logs
+*.log
+
+## Secrets
+appsettings.Development.json
+.env

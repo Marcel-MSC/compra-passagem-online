@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="CompraPassagemOnline.Api/CompraPassagemOnline.Api.csproj" />
+  <Project Path="CompraPassagemOnline.Application/CompraPassagemOnline.Application.csproj" />
+  <Project Path="CompraPassagemOnline.Domain/CompraPassagemOnline.Domain.csproj" />
+  <Project Path="CompraPassagemOnline.Infrastructure/CompraPassagemOnline.Infrastructure.csproj" />
+  <Project Path="CompraPassagemOnline.Workers/CompraPassagemOnline.Workers.csproj" />
+</Solution>
