@@ -16,6 +16,9 @@ Thumbs.db
 ## Logs
 *.log
 
+## Load test reports
+reports/
+
 ## Secrets
 appsettings.Development.json
 .env

@@ -4,4 +4,5 @@
   <Project Path="CompraPassagemOnline.Domain/CompraPassagemOnline.Domain.csproj" />
   <Project Path="CompraPassagemOnline.Infrastructure/CompraPassagemOnline.Infrastructure.csproj" />
   <Project Path="CompraPassagemOnline.Workers/CompraPassagemOnline.Workers.csproj" />
+  <Project Path="CompraPassagemOnline.Tests/CompraPassagemOnline.Tests.csproj" />
 </Solution>

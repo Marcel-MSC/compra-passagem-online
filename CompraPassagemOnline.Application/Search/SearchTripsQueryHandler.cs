@@ -2,6 +2,7 @@ using CompraPassagemOnline.Application.Common;
 using CompraPassagemOnline.Application.Interfaces;
 using CompraPassagemOnline.Application.Search;
 using MediatR;
+using Microsoft.Extensions.Options;
 
 namespace CompraPassagemOnline.Application.Search;
 
@@ -9,11 +10,16 @@ public sealed class SearchTripsQueryHandler : IRequestHandler<SearchTripsQuery, 
 {
     private readonly IAppDatabase _database;
     private readonly ISearchCacheService _cache;
+    private readonly ReservationOptions _options;
 
-    public SearchTripsQueryHandler(IAppDatabase database, ISearchCacheService cache)
+    public SearchTripsQueryHandler(
+        IAppDatabase database,
+        ISearchCacheService cache,
+        IOptions<ReservationOptions> options)
     {
         _database = database;
         _cache = cache;
+        _options = options.Value;
     }
 
     public async Task<IReadOnlyList<TripDto>> Handle(SearchTripsQuery request, CancellationToken cancellationToken)
@@ -33,7 +39,7 @@ public sealed class SearchTripsQueryHandler : IRequestHandler<SearchTripsQuery, 
             t.Price,
             t.Seats.Count(s => s.Status == Domain.Enums.SeatStatus.Available))).ToList();
 
-        await _cache.SetAsync(cacheKey, result, ReservationOptions.SearchCacheTtl, cancellationToken);
+        await _cache.SetAsync(cacheKey, result, _options.SearchCacheTtl, cancellationToken);
         return result;
     }
 }

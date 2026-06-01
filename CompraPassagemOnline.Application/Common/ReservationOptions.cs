@@ -1,7 +1,12 @@
 namespace CompraPassagemOnline.Application.Common;
 
-public static class ReservationOptions
+public sealed class ReservationOptions
 {
-    public static readonly TimeSpan HoldDuration = TimeSpan.FromMinutes(15);
-    public static readonly TimeSpan SearchCacheTtl = TimeSpan.FromSeconds(60);
+    public const string SectionName = "Reservation";
+
+    public TimeSpan HoldDuration { get; set; } = TimeSpan.FromMinutes(15);
+
+    public TimeSpan SearchCacheTtl { get; set; } = TimeSpan.FromSeconds(60);
+
+    public TimeSpan ExpiryWorkerInterval { get; set; } = TimeSpan.FromSeconds(30);
 }

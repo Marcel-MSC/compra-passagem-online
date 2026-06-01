@@ -6,6 +6,7 @@ using CompraPassagemOnline.Domain.Entities;
 using CompraPassagemOnline.Domain.Enums;
 using MassTransit;
 using MediatR;
+using Microsoft.Extensions.Options;
 
 namespace CompraPassagemOnline.Application.Booking;
 
@@ -14,15 +15,18 @@ public sealed class CreateReservationCommandHandler : IRequestHandler<CreateRese
     private readonly IAppDatabase _database;
     private readonly ISeatLockService _seatLock;
     private readonly IPublishEndpoint _publishEndpoint;
+    private readonly ReservationOptions _options;
 
     public CreateReservationCommandHandler(
         IAppDatabase database,
         ISeatLockService seatLock,
-        IPublishEndpoint publishEndpoint)
+        IPublishEndpoint publishEndpoint,
+        IOptions<ReservationOptions> options)
     {
         _database = database;
         _seatLock = seatLock;
         _publishEndpoint = publishEndpoint;
+        _options = options.Value;
     }
 
     public async Task<ReservationDto> Handle(CreateReservationCommand request, CancellationToken cancellationToken)
@@ -37,7 +41,7 @@ public sealed class CreateReservationCommandHandler : IRequestHandler<CreateRese
             request.TripId,
             request.SeatId,
             request.UserId,
-            ReservationOptions.HoldDuration,
+            _options.HoldDuration,
             cancellationToken);
 
         if (!lockAcquired)
@@ -60,7 +64,7 @@ public sealed class CreateReservationCommandHandler : IRequestHandler<CreateRese
                 UserId = request.UserId,
                 Status = ReservationStatus.Active,
                 CreatedAt = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.Add(ReservationOptions.HoldDuration)
+                ExpiresAt = DateTime.UtcNow.Add(_options.HoldDuration)
             };
 
             await _database.AddReservationAsync(reservation, cancellationToken);

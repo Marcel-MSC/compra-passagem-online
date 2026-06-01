@@ -1,9 +1,8 @@
-using CompraPassagemOnline.Application;
+using CompraPassagemOnline.Application.Common;
 using CompraPassagemOnline.Application.Interfaces;
 using CompraPassagemOnline.Application.Ticketing;
-using CompraPassagemOnline.Infrastructure;
-using CompraPassagemOnline.Infrastructure.Persistence;
 using MediatR;
+using Microsoft.Extensions.Options;
 
 namespace CompraPassagemOnline.Workers;
 
@@ -11,11 +10,16 @@ public sealed class ReservationExpiryWorker : BackgroundService
 {
     private readonly IServiceProvider _services;
     private readonly ILogger<ReservationExpiryWorker> _logger;
+    private readonly TimeSpan _interval;
 
-    public ReservationExpiryWorker(IServiceProvider services, ILogger<ReservationExpiryWorker> logger)
+    public ReservationExpiryWorker(
+        IServiceProvider services,
+        ILogger<ReservationExpiryWorker> logger,
+        IOptions<ReservationOptions> options)
     {
         _services = services;
         _logger = logger;
+        _interval = options.Value.ExpiryWorkerInterval;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -40,7 +44,7 @@ public sealed class ReservationExpiryWorker : BackgroundService
                 _logger.LogError(ex, "Erro ao expirar reservas");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+            await Task.Delay(_interval, stoppingToken);
         }
     }
 }
