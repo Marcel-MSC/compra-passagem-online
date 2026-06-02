@@ -113,11 +113,13 @@ O `ReservationExpiryWorker` (intervalo configurável) busca reservas `Active` co
 # Teste rápido (ambiente Testing: TTL 5s)
 dotnet test --filter ReservationAbandonment
 
-# Demo com worker (Development: TTL 1 min)
-dotnet run --project CompraPassagemOnline.Workers
-dotnet run --project CompraPassagemOnline.Api
+# Demo com worker (Development: TTL 1 min) — -WaitForExpiry e OBRIGATORIO no script
+dotnet run --project CompraPassagemOnline.Workers   # terminal 1
+dotnet run --project CompraPassagemOnline.Api       # terminal 2
+.\scripts\reset-test-data.ps1
 .\scripts\run-challenge-scenarios.ps1 -WaitForExpiry
 
+# Sem -WaitForExpiry o cenario 3 aparece como FALHOU (nao valida expiracao).
 # Aguarda 75 s por padrao (1 min TTL + intervalo do worker). Ajuste: -ExpiryWaitSeconds 90
 ```
 
@@ -198,7 +200,18 @@ Implementação: `CompraPassagemOnline.Tests/Infrastructure/ScenarioReporter.cs`
 
 ## Limpar dados entre execuções
 
-O script [`scripts/run-challenge-scenarios.ps1`](../scripts/run-challenge-scenarios.ps1) mostra **quantos assentos estão Available** no início. Se o inventário estiver zerado, os cenários 1–3 falham com mensagem clara (evita `seatId` inválido / HTTP 400).
+O script [`scripts/run-challenge-scenarios.ps1`](../scripts/run-challenge-scenarios.ps1) mostra **quantos assentos estão Available** no início. Se o inventário estiver zerado, os cenários 1–4 falham ou o k6 aborta no preflight.
+
+### Seed da viagem demo (PostgreSQL)
+
+Quando o banco está **vazio** (volume Docker novo, primeira execução):
+
+```powershell
+.\scripts\start-infra.ps1
+.\scripts\seed-data.ps1
+```
+
+Cria a viagem `11111111-1111-1111-1111-111111111111` (Sao Paulo → Rio de Janeiro, amanhã UTC), 40 assentos, aplica migrations e limpa cache Redis. A API também faz seed no startup, mas este script resolve o caso sem subir o servidor web.
 
 ### Reset manual (PostgreSQL + Redis)
 
@@ -207,6 +220,8 @@ O script [`scripts/run-challenge-scenarios.ps1`](../scripts/run-challenge-scenar
 ```
 
 Remove reservas, pedidos e pagamentos; define todos os assentos como `Available`; executa `FLUSHALL` no Redis.
+
+Se a busca por viagens retornar vazio (data do seed desatualizada), reinicie a API — o seed atualiza `DepartureAt` para amanhã — ou rode o reset acima.
 
 ### Antes do k6 (pergunta interativa)
 

@@ -31,6 +31,9 @@ var app = builder.Build();
 
 await DatabaseSeeder.SeedAsync(app.Services);
 
+if (args.Contains("--seed", StringComparer.OrdinalIgnoreCase))
+    return;
+
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseSerilogRequestLogging();

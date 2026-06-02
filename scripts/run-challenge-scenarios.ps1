@@ -141,14 +141,69 @@ function Invoke-Api {
     return $response.Content | ConvertFrom-Json
 }
 
+function Get-SearchTripId {
+    param([string]$Date)
+
+    $path = "/api/trips?from=Sao%20Paulo&to=Rio%20de%20Janeiro&date=$Date"
+    $raw = Invoke-Api GET $path
+
+    if ($null -eq $raw) {
+        throw "Nenhuma viagem encontrada para $Date. Reinicie a API (atualiza datas do seed) ou rode .\scripts\reset-test-data.ps1"
+    }
+
+    foreach ($trip in @($raw)) {
+        if ($null -eq $trip) { continue }
+
+        $id = $trip.id
+        if ([string]::IsNullOrWhiteSpace($id) -and $trip.PSObject.Properties.Name -contains 'Id') {
+            $id = $trip.Id
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($id)) {
+            return [string]$id
+        }
+    }
+
+    throw "Nenhuma viagem encontrada para $Date. Reinicie a API (atualiza datas do seed) ou rode .\scripts\reset-test-data.ps1"
+}
+
+function Test-SeatAvailable {
+    param($Seat)
+    if ($null -eq $Seat) { return $false }
+    return $Seat.status -eq 0 -or $Seat.status -eq 'Available'
+}
+
+function New-ReservationBody {
+    param(
+        [string]$TripId,
+        [object]$Seat,
+        [string]$UserId
+    )
+
+    $seatId = $Seat.id
+    if ([string]::IsNullOrWhiteSpace($seatId) -and $Seat.PSObject.Properties.Name -contains 'Id') {
+        $seatId = $Seat.Id
+    }
+
+    return @{
+        tripId = [string]$TripId
+        seatId = [string]$seatId
+        userId = $UserId
+    }
+}
+
 function Get-AvailableSeats {
     param(
         [string]$TripId,
         [int]$Limit = 0
     )
 
-    $seats = Invoke-Api GET "/api/trips/$TripId/seats"
-    $available = @($seats | Where-Object { $_.status -eq 0 })
+    if ([string]::IsNullOrWhiteSpace($TripId)) {
+        throw 'TripId vazio. Falha ao resolver viagem da busca.'
+    }
+
+    $seats = @(Invoke-Api GET "/api/trips/$TripId/seats")
+    $available = @($seats | Where-Object { Test-SeatAvailable $_ })
     if ($Limit -gt 0) {
         return @($available | Select-Object -First $Limit)
     }
@@ -180,17 +235,20 @@ Ou: docker compose exec redis redis-cli FLUSHALL
 function Get-AvailableSeat {
     param([string]$TripId)
 
-    $seat = Get-AvailableSeats -TripId $TripId -Limit 1 | Select-Object -First 1
-    if (-not $seat) {
+    $available = @(Get-AvailableSeats -TripId $TripId)
+    if ($available.Count -eq 0) {
         throw "Nenhum assento disponivel (status=0). Execute .\scripts\reset-test-data.ps1"
     }
-    return $seat
+    return @($available[0])[0]
 }
 
 function Get-SeatStatus {
     param([string]$TripId, [string]$SeatId)
-    $seats = Invoke-Api GET "/api/trips/$TripId/seats"
-    $seat = $seats | Where-Object { $_.id -eq $SeatId } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($TripId)) {
+        throw 'TripId vazio. Falha ao resolver viagem da busca.'
+    }
+    $seats = @(Invoke-Api GET "/api/trips/$TripId/seats")
+    $seat = $seats | Where-Object { [string]$_.id -eq [string]$SeatId } | Select-Object -First 1
     return $seat.status
 }
 
@@ -228,9 +286,15 @@ catch {
     exit 1
 }
 
-$date = (Get-Date).AddDays(1).ToString("yyyy-MM-dd")
-$trips = Invoke-Api GET "/api/trips?from=Sao%20Paulo&to=Rio%20de%20Janeiro&date=$date"
-$tripId = $trips[0].id
+# Amanha em UTC (mesmo criterio do DatabaseSeeder e k6)
+$date = [DateTime]::UtcNow.Date.AddDays(1).ToString('yyyy-MM-dd')
+try {
+    $tripId = Get-SearchTripId -Date $date
+}
+catch {
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
+}
 
 $initialAvailable = Get-AvailableSeatCount -TripId $tripId
 Write-Step "Assentos disponiveis (inicio)" $initialAvailable $(if ($initialAvailable -gt 0) { "Green" } else { "Red" })
@@ -254,18 +318,11 @@ Write-ScenarioHeader 1 "Dois usuarios no mesmo assento"
 try {
     Assert-InventoryForScenario -TripId $tripId -ScenarioName "Concorrencia" | Out-Null
     $seat = Get-AvailableSeat -TripId $tripId
-    $before = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seat.id)
+    $seatId = [string](New-ReservationBody -TripId $tripId -Seat $seat -UserId 'x').seatId
+    $before = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seatId)
 
-    $r1 = Invoke-ApiRaw POST "/api/reservations" @{
-        tripId = $tripId
-        seatId = $seat.id
-        userId = "demo-user-a-$(Get-Random)"
-    }
-    $r2 = Invoke-ApiRaw POST "/api/reservations" @{
-        tripId = $tripId
-        seatId = $seat.id
-        userId = "demo-user-b-$(Get-Random)"
-    }
+    $r1 = Invoke-ApiRaw POST "/api/reservations" (New-ReservationBody -TripId $tripId -Seat $seat -UserId "demo-user-a-$(Get-Random)")
+    $r2 = Invoke-ApiRaw POST "/api/reservations" (New-ReservationBody -TripId $tripId -Seat $seat -UserId "demo-user-b-$(Get-Random)")
 
     $winner = if ($r1.StatusCode -eq 201) { "Usuario A" } elseif ($r2.StatusCode -eq 201) { "Usuario B" } else { "Nenhum" }
     $loserCode = if ($r1.StatusCode -eq 409 -or $r2.StatusCode -eq 409) { "409 Conflict" } else { "erro inesperado" }
@@ -274,7 +331,7 @@ try {
     Write-Step "Vencedor da reserva" $winner "Green"
     Write-Step "Segundo usuario" $loserCode "Yellow"
 
-    $after = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seat.id)
+    $after = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seatId)
     Write-StateTable $before $after
 
     $results.Concorrencia = ($r1.StatusCode -eq 201 -or $r2.StatusCode -eq 201) -and ($r1.StatusCode -eq 409 -or $r2.StatusCode -eq 409)
@@ -288,13 +345,10 @@ Write-ScenarioHeader 2 "Falha no pagamento apos reserva"
 try {
     Assert-InventoryForScenario -TripId $tripId -ScenarioName "Falha no pagamento" | Out-Null
     $seat = Get-AvailableSeat -TripId $tripId
-    $before = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seat.id)
+    $seatId = [string](New-ReservationBody -TripId $tripId -Seat $seat -UserId 'x').seatId
+    $before = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seatId)
 
-    $reservation = Invoke-Api POST "/api/reservations" @{
-        tripId = $tripId
-        seatId = $seat.id
-        userId = "demo-pay-fail-$(Get-Random)"
-    }
+    $reservation = Invoke-Api POST "/api/reservations" (New-ReservationBody -TripId $tripId -Seat $seat -UserId "demo-pay-fail-$(Get-Random)")
     Write-Step "Reserva" "OK (201)" "Green"
 
     $order = Invoke-Api POST "/api/orders" @{
@@ -310,7 +364,7 @@ try {
     }
     Write-Step "Pagamento" "FALHOU ($($payment.status))" "Yellow"
 
-    $after = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seat.id)
+    $after = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seatId)
     Write-StateTable "$before (reservado)" $after
     Write-Step "Compensacao" "Assento liberado, pedido cancelado" "Green"
 
@@ -325,14 +379,11 @@ Write-ScenarioHeader 3 "Usuario abandona apos reservar"
 try {
     Assert-InventoryForScenario -TripId $tripId -ScenarioName "Abandono" | Out-Null
     $seat = Get-AvailableSeat -TripId $tripId
-    $reservation = Invoke-Api POST "/api/reservations" @{
-        tripId = $tripId
-        seatId = $seat.id
-        userId = "demo-abandon-$(Get-Random)"
-    }
+    $seatId = [string](New-ReservationBody -TripId $tripId -Seat $seat -UserId 'x').seatId
+    $reservation = Invoke-Api POST "/api/reservations" (New-ReservationBody -TripId $tripId -Seat $seat -UserId "demo-abandon-$(Get-Random)")
 
     Write-Step 'Reserva criada' 'OK - expira em ~1 min (Development)' 'Green'
-    Write-Step "Assento agora" (Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seat.id)) "Yellow"
+    Write-Step "Assento agora" (Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seatId)) "Yellow"
     Write-Host ""
     Write-Host "  O ReservationExpiryWorker libera o assento quando ExpiresAt passa." -ForegroundColor DarkGray
     Write-Host '  Rode em outro terminal: dotnet run --project CompraPassagemOnline.Workers' -ForegroundColor DarkGray
@@ -340,13 +391,13 @@ try {
     if ($WaitForExpiry) {
         Write-Step "Aguardando TTL" ("{0} segundos (HoldDuration 1 min + worker)" -f $ExpiryWaitSeconds) "Yellow"
         Start-Sleep -Seconds $ExpiryWaitSeconds
-        $after = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seat.id)
+        $after = Get-StatusName (Get-SeatStatus -TripId $tripId -SeatId $seatId)
         Write-Step "Assento apos espera" $after
         $results.Abandono = ($after -eq "Available")
     }
     else {
-        Write-Step "Dica" "Use -WaitForExpiry com worker rodando" "DarkGray"
-        $results.Abandono = $true
+        Write-Step "Abandono" "SKIP (obrigatorio: -WaitForExpiry + Workers)" "Yellow"
+        $results.Abandono = $false
     }
 }
 catch {
@@ -398,7 +449,7 @@ try {
 
             if ($PSVersionTable.PSVersion.Major -ge 7) {
                 $jobResults.AddRange(@($seats | ForEach-Object -Parallel {
-                    $body = (@{ tripId = $using:tripId; seatId = $_.id; userId = "scale-$(Get-Random)" } | ConvertTo-Json)
+                    $body = (@{ tripId = [string]$using:tripId; seatId = [string]$_.id; userId = "scale-$(Get-Random)" } | ConvertTo-Json)
                     $uri = '{0}/api/reservations' -f $using:BaseUrl
                     $r = Invoke-WebRequestAllowError -Uri $uri -Method POST -Body $body
                     [pscustomobject]@{ Status = $r.StatusCode }
@@ -406,7 +457,7 @@ try {
             }
             else {
                 foreach ($s in $seats) {
-                    $body = (@{ tripId = $tripId; seatId = $s.id; userId = "scale-$(Get-Random)" } | ConvertTo-Json)
+                    $body = (@{ tripId = [string]$tripId; seatId = [string]$s.id; userId = "scale-$(Get-Random)" } | ConvertTo-Json)
                     $uri = '{0}/api/reservations' -f $BaseUrl
                     $r = Invoke-WebRequestAllowError -Uri $uri -Method POST -Body $body
                     $jobResults.Add([pscustomobject]@{ Status = $r.StatusCode })
